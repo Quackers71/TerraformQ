@@ -1,0 +1,16 @@
+// Installing Terraform using Chocolatey
+
+Using Windows PowerShell in Administrator mode
+
+run : 
+
+Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+You can try :
+
+choco update chocolatey
+
+then run :
+
+choco install terraform
+
