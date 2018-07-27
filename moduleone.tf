@@ -8,6 +8,9 @@ variable "private_key_path" {}
 variable "key_name" {
   default = "QEC2DPC"
 }
+variable "security_group" {
+  default = "sg-0af58e003d739d391"
+}
 
 ##################################################################################
 # PROVIDERS
