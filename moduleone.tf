@@ -8,9 +8,7 @@ variable "private_key_path" {}
 variable "key_name" {
   default = "QEC2DPC"
 }
-variable "security_group" {
-  default = "sg-0af58e003d739d391"
-}
+variable "security_group_id" {}
 
 ##################################################################################
 # PROVIDERS
@@ -26,10 +24,15 @@ provider "aws" {
 # RESOURCES
 ##################################################################################
 
+data "aws_security_group" "selected"{ 
+	id = "${var.security_group_id}"
+}
+
 resource "aws_instance" "nginx" {
   ami           = "ami-b2b55cd5"
   instance_type = "t2.micro"
   key_name        = "${var.key_name}"
+  
 
   connection {
     user        = "ec2-user"
