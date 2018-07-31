@@ -7,9 +7,12 @@ variable "aws_secret_key" {}
 variable "private_key_path" {}
 
 variable "key_name" {
-  default = "PluralsightKeys"
+  default = "QEC2DPC"
 }
-
+variable "my_region" {
+  default = "eu-west-2"
+}
+	
 variable "network_address_space" {
   default = "10.1.0.0/16"
 }
@@ -18,12 +21,12 @@ variable "billing_code_tag" {}
 variable "environment_tag" {}
 variable "bucket_name" {}
 
-variable "arm_subscription_id" {}
-variable "arm_principal" {}
-variable "arm_password" {}
-variable "tenant_id" {}
-variable "dns_zone_name" {}
-variable "dns_resource_group" {}
+#variable "arm_subscription_id" {}
+#variable "arm_principal" {}
+#variable "arm_password" {}
+#variable "tenant_id" {}
+variable "aws_route53_zone" {}
+variable "aws_route53_record" {}
 
 variable "instance_count" {
   default = 2
@@ -40,15 +43,7 @@ variable "subnet_count" {
 provider "aws" {
   access_key = "${var.aws_access_key}"
   secret_key = "${var.aws_secret_key}"
-  region     = "us-east-1"
-}
-
-provider "azurerm" {
-  subscription_id = "${var.arm_subscription_id}"
-  client_id       = "${var.arm_principal}"
-  client_secret   = "${var.arm_password}"
-  tenant_id       = "${var.tenant_id}"
-  alias           = "arm-1"
+  region     = "${var.my_region}"
 }
 
 ##################################################################################
@@ -207,7 +202,7 @@ resource "aws_elb" "web" {
 # INSTANCES #
 resource "aws_instance" "nginx" {
   count                  = "${var.instance_count}"
-  ami                    = "ami-c58c1dd3"
+  ami                    = "ami-b2b55cd5"
   instance_type          = "t2.micro"
   subnet_id              = "${element(aws_subnet.subnet.*.id,count.index % var.subnet_count)}"
   vpc_security_group_ids = ["${aws_security_group.nginx-sg.id}"]
@@ -232,7 +227,7 @@ EOF
 
   provisioner "file" {
     content = <<EOF
-/var/log/nginx/*log {
+/var/log/nginx//*log {
     daily
     rotate 10
     missingok
@@ -356,27 +351,13 @@ resource "aws_s3_bucket_object" "graphic" {
   source = "./Globo_logo_Vert.png"
 }
 
-# Azure RM DNS #
-resource "azurerm_dns_cname_record" "elb" {
+#AWS DNS #
+resource "aws_route53_record" "elb" {
   name                = "${var.environment_tag}-website"
-  
-  
-  
-  
-  
-  
-  
-  zone_name           = "${var.dns_zone_name}"
-  resource_group_name = "${var.dns_resource_group}"
+  zone_id             = "${var.aws_route53_zone}"
+  type				  = "A"
   ttl                 = "30"
-  record              = "${aws_elb.web.dns_name}"
-  provider            = "azurerm.arm-1"
-
-  tags {
-    Name        = "${var.environment_tag}-website"
-    BillingCode = "${var.billing_code_tag}"
-    Environment = "${var.environment_tag}"
-  }
+  provider            = "aws"
 }
 
 ##################################################################################
@@ -387,6 +368,6 @@ output "aws_elb_public_dns" {
   value = "${aws_elb.web.dns_name}"
 }
 
-output "azure_rm_dns_cname" {
-  value = "${azurerm_dns_cname_record.elb.id}"
+output "aws_elb_dns_cname" {
+  value = "${aws_route53_record.elb.id}"
 }
