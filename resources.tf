@@ -1,37 +1,19 @@
 ##################################################################################
-# VARIABLES
-##################################################################################
-
-variable "aws_access_key" {}
-variable "aws_secret_key" {}
-variable "private_key_path" {}
-variable "key_name" {
-  default = "QEC2DPC"
-}
-variable "my_region" {
-  default = "eu-west-2"
-}
-variable "network_address_space" {
-  default = "10.1.0.0/16"
-}
-variable "subnet1_address_space" {
-  default = "10.1.0.0/24"
-}
-variable "subnet2_address_space" {
-  default = "10.1.1.0/24"
-}
-variable "billing_code_tag" {}
-variable "environment_tag" {}
-variable "bucket_name" {}
-
-##################################################################################
 # PROVIDERS
 ##################################################################################
 
 provider "aws" {
   access_key = "${var.aws_access_key}"
   secret_key = "${var.aws_secret_key}"
-  region     = "${var.my_region}"
+  region     = "us-east-1"
+}
+
+provider "azurerm" {
+  subscription_id = "${var.arm_subscription_id}"
+  client_id = "${var.arm_principal}"
+  client_secret = "${var.arm_password}"
+  tenant_id = "${var.tenant_id}"
+  alias = "arm-1"
 }
 
 ##################################################################################
@@ -66,32 +48,18 @@ resource "aws_internet_gateway" "igw" {
 
 }
 
-resource "aws_subnet" "subnet1" {
-  cidr_block        = "${var.subnet1_address_space}"
-  vpc_id            = "${aws_vpc.vpc.id}"
+resource "aws_subnet" "subnet" {
+  count = "${var.subnet_count}"
+  cidr_block = "${cidrsubnet(var.network_address_space, 8, count.index + 1)}"
+  vpc_id = "${aws_vpc.vpc.id}"
   map_public_ip_on_launch = "true"
-  availability_zone = "${data.aws_availability_zones.available.names[0]}"
+  availability_zone = "${data.aws_availability_zones.available.names[count.index]}"
 
   tags {
-    Name = "${var.environment_tag}-subnet1"
+    Name = "${var.environment_tag}-subnet-${count.index + 1}"
     BillingCode        = "${var.billing_code_tag}"
     Environment = "${var.environment_tag}"
   }
-
-}
-
-resource "aws_subnet" "subnet2" {
-  cidr_block        = "${var.subnet2_address_space}"
-  vpc_id            = "${aws_vpc.vpc.id}"
-  map_public_ip_on_launch = "true"
-  availability_zone = "${data.aws_availability_zones.available.names[1]}"
-
-  tags {
-    Name = "${var.environment_tag}-subnet2"
-    BillingCode        = "${var.billing_code_tag}"
-    Environment = "${var.environment_tag}"
-  }
-
 }
 
 # ROUTING #
@@ -111,13 +79,9 @@ resource "aws_route_table" "rtb" {
 
 }
 
-resource "aws_route_table_association" "rta-subnet1" {
-  subnet_id      = "${aws_subnet.subnet1.id}"
-  route_table_id = "${aws_route_table.rtb.id}"
-}
-
-resource "aws_route_table_association" "rta-subnet2" {
-  subnet_id      = "${aws_subnet.subnet2.id}"
+resource "aws_route_table_association" "rta-subnet" {
+  count = "${var.subnet_count}"
+  subnet_id      = "${element(aws_subnet.subnet.*.id,count.index)}"
   route_table_id = "${aws_route_table.rtb.id}"
 }
 
@@ -189,11 +153,11 @@ resource "aws_security_group" "nginx-sg" {
 
 # LOAD BALANCER #
 resource "aws_elb" "web" {
-  name = "nginx-elb"
+  name = "${var.environment_tag}-nginx-elb"
 
-  subnets         = ["${aws_subnet.subnet1.id}", "${aws_subnet.subnet2.id}"]
+  subnets         = ["${aws_subnet.subnet.*.id}"]
   security_groups = ["${aws_security_group.elb-sg.id}"]
-  instances       = ["${aws_instance.nginx1.id}", "${aws_instance.nginx2.id}"]
+  instances       = ["${aws_instance.nginx.*.id}"]
 
   listener {
     instance_port     = 80
@@ -211,10 +175,11 @@ resource "aws_elb" "web" {
 }
 
 # INSTANCES #
-resource "aws_instance" "nginx1" {
-  ami           = "ami-b2b55cd5"
+resource "aws_instance" "nginx" {
+  count = "${var.instance_count}"
+  ami           = "ami-c58c1dd3"
   instance_type = "t2.micro"
-  subnet_id     = "${aws_subnet.subnet1.id}"
+  subnet_id     = "${element(aws_subnet.subnet.*.id,count.index % var.subnet_count)}"
   vpc_security_group_ids = ["${aws_security_group.nginx-sg.id}"]
   key_name        = "${var.key_name}"
 
@@ -228,7 +193,7 @@ resource "aws_instance" "nginx1" {
 access_key = ${aws_iam_access_key.write_user.id}
 secret_key = ${aws_iam_access_key.write_user.secret}
 use_https = True
-bucket_location = EU
+bucket_location = US
 
 EOF
     destination = "/home/ec2-user/.s3cfg"
@@ -236,7 +201,7 @@ EOF
 
   provisioner "file" {
     content = <<EOF
-/var/log/nginx//*log {
+/var/log/nginx/*log {
     daily
     rotate 10
     missingok
@@ -270,73 +235,7 @@ EOF
   }
 
   tags {
-    Name = "${var.environment_tag}-nginx1"
-    BillingCode        = "${var.billing_code_tag}"
-    Environment = "${var.environment_tag}"
-  }
-
-}
-
-resource "aws_instance" "nginx2" {
-  ami           = "ami-b2b55cd5"
-  instance_type = "t2.micro"
-  subnet_id     = "${aws_subnet.subnet2.id}"
-  vpc_security_group_ids = ["${aws_security_group.nginx-sg.id}"]
-  key_name        = "${var.key_name}"
-
-  connection {
-    user        = "ec2-user"
-    private_key = "${file(var.private_key_path)}"
-  }
-
-  provisioner "file" {
-    content = <<EOF
-access_key = ${aws_iam_access_key.write_user.id}
-secret_key = ${aws_iam_access_key.write_user.secret}
-use_https = True
-bucket_location = EU
-
-EOF
-    destination = "/home/ec2-user/.s3cfg"
-  }
-
-  provisioner "file" {
-    content = <<EOF
-/var/log/nginx//*log {
-    daily
-    rotate 10
-    missingok
-    compress
-    sharedscripts
-    postrotate
-      INSTANCE_ID=`curl --silent http://169.254.169.254/latest/meta-data/instance-id`
-      /usr/local/bin/s3cmd sync /var/log/nginx/access.log-* s3://${aws_s3_bucket.web_bucket.id}/$INSTANCE_ID/nginx/
-      /usr/local/bin/s3cmd sync /var/log/nginx/error.log-* s3://${aws_s3_bucket.web_bucket.id}/$INSTANCE_ID/nginx/
-    endscript
-}
-
-EOF
-    destination = "/home/ec2-user/nginx"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo yum install nginx -y",
-      "sudo service nginx start",
-      "sudo cp /home/ec2-user/.s3cfg /root/.s3cfg",
-      "sudo cp /home/ec2-user/nginx /etc/logrotate.d/nginx",
-      "sudo pip install s3cmd",
-      "s3cmd get s3://${aws_s3_bucket.web_bucket.id}/website/index.html .",
-      "s3cmd get s3://${aws_s3_bucket.web_bucket.id}/website/Globo_logo_Vert.png .",
-      "sudo cp /home/ec2-user/index.html /usr/share/nginx/html/index.html",
-      "sudo cp /home/ec2-user/Globo_logo_Vert.png /usr/share/nginx/html/Globo_logo_Vert.png",
-      "sudo logrotate -f /etc/logrotate.conf"
-      
-    ]
-  }
-
-  tags {
-    Name = "${var.environment_tag}-nginx2"
+    Name = "${var.environment_tag}-nginx-${count.index + 1}"
     BillingCode        = "${var.billing_code_tag}"
     Environment = "${var.environment_tag}"
   }
@@ -430,10 +329,18 @@ resource "aws_s3_bucket_object" "graphic" {
 
 }
 
-##################################################################################
-# OUTPUT
-##################################################################################
+# Azure RM DNS #
+resource "azurerm_dns_cname_record" "elb" {
+  name                = "${var.dns_site_name}"
+  zone_name           = "${var.dns_zone_name}"
+  resource_group_name = "${var.dns_resource_group}"
+  ttl                 = "30"
+  record              = "${aws_elb.web.dns_name}"
+  provider            = "azurerm.arm-1"
 
-output "aws_elb_public_dns" {
-    value = "${aws_elb.web.dns_name}"
+  tags {
+    Name = "${var.dns_site_name}"
+    BillingCode        = "${var.billing_code_tag}"
+    Environment = "${var.environment_tag}"
+  }
 }
